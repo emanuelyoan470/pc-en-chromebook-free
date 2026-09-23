@@ -25,13 +25,13 @@ jobs:
 
       - name: Create RDP User
         run: |
-          $pass = "SkyroPass2026!"
-          $secPass = ConvertTo-SecureString$pass -AsPlainText -Force
-          New-LocalUser -Name "Skyro" -Password $secPass -AccountNeverExpires -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Administrators" -Member "Skyro" -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Skyro" -ErrorAction SilentlyContinue
+          net user Skyro SkyroPass2026! /add /expires:never
+          net localgroup Administradores Skyro /add
+          net localgroup Administrators Skyro /add
+          net localgroup "Usuarios de escritorio remoto" Skyro /add
+          net localgroup "Remote Desktop Users" Skyro /add
           
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=$pass"
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=SkyroPass2026!"
 
       - name: Setup Direct Tunnel Gateway
         run: |
