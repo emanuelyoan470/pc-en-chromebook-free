@@ -16,7 +16,7 @@ jobs:
           reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
           reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v SecurityLayer /t REG_DWORD /d 0 /f
           netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
-          net start TermService /y
+          net start TermService /y || exit 0
 
       - name: Create RDP User
         shell: cmd
@@ -39,7 +39,7 @@ jobs:
         shell: powershell
         run: |
           Write-Host "`n------------------------------------------------------"
-          Write-Host "ABRE EL ENLACE QUE APARECERÁ EN PANTALLA PARA INICIAR SESIÓN:"
+          Write-Host "ABRE EL SIGUIENTE ENLACE EN TU NAVEGADOR PARA AUTORIZAR:"
           Write-Host "------------------------------------------------------`n"
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-runner-$env:GITHUB_RUN_ID"
 
