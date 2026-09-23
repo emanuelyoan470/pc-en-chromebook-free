@@ -25,13 +25,16 @@ jobs:
 
       - name: Create RDP User
         run: |
-          $pass = "P@ssw0rdSkyro2026!"
-          $secPass = ConvertTo-SecureString$pass -AsPlainText -Force
-          New-LocalUser -Name "Skyro" -Password $secPass -AccountNeverExpires -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Administrators" -Member "Skyro" -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Skyro" -ErrorAction SilentlyContinue
+          $Computer = [ADSI]"WinNT://$env:COMPUTERNAME"
+          $User =$Computer.Create("User", "Skyro")
+          $User.SetPassword("P@ssw0rdSkyro2026!")
+          $User.SetInfo()
           
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=$pass"
+          $Group1 = [ADSI]"WinNT://$env:COMPUTERNAME/Administrators,group"
+          $Group1.Add("WinNT://$env:COMPUTERNAME/Skyro")
+          
+          $Group2 = [ADSI]"WinNT://$env:COMPUTERNAME/Remote Desktop Users,group"
+          $Group2.Add("WinNT://$env:COMPUTERNAME/Skyro")
 
       - name: Install Tailscale
         run: |
@@ -54,7 +57,7 @@ jobs:
           Write-Host "`n======================================================`n"
           Write-Host " TAILSCALE IP CONECTADA: $tsIP"
           Write-Host " USUARIO: Skyro"
-          Write-Host " CONTRASEÑA: $env:RDP_PASS"
+          Write-Host " CONTRASEÑA: P@ssw0rdSkyro2026!"
           Write-Host "`n======================================================`n"
           
           while ($true) {
