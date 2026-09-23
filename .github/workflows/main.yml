@@ -16,22 +16,22 @@ jobs:
           reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
           reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v SecurityLayer /t REG_DWORD /d 0 /f
           netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
-          net start TermService /y || exit 0
+          net start TermService
 
       - name: Create RDP User
         shell: cmd
         run: |
-          net user Skyro P@ssw0rdSkyro2026! /add /expires:never
+          net user Skyro "P@ssw0rdSkyro2026!" /add /expires:never /y
           net localgroup Administrators Skyro /add
           net localgroup "Remote Desktop Users" Skyro /add
-          echo RDP_PASS=P@ssw0rdSkyro2026! >> %GITHUB_ENV%
+          echo RDP_PASS=P@ssw0rdSkyro2026!>> %GITHUB_ENV%
 
       - name: Install Tailscale
         shell: powershell
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri $tsUrl -OutFile$installerPath
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
 
@@ -41,19 +41,19 @@ jobs:
           Write-Host "`n------------------------------------------------------"
           Write-Host "ABRE EL SIGUIENTE ENLACE EN TU NAVEGADOR PARA AUTORIZAR:"
           Write-Host "------------------------------------------------------`n"
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-runner-$env:GITHUB_RUN_ID"
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-runner-$env:GITHUB_RUN_ID" --authkey="${{ secrets.TAILSCALE_AUTHKEY }}"
 
       - name: Maintain Connection
         shell: powershell
         run: |
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           Write-Host "`n======================================================"
-          Write-Host " CONEXIÓN RDP ESTABLECIDA"
+          Write-Host " CONEXION RDP ESTABLECIDA"
           Write-Host " Tailscale IP : $tsIP"
           Write-Host " Usuario      : Skyro"
-          Write-Host " Contraseña   : $env:RDP_PASS"
+          Write-Host " Contrasena   : $env:RDP_PASS"
           Write-Host "======================================================`n"
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP Activo - Tailscale IP:$tsIP"
+              Write-Host "[$(Get-Date)] RDP Activo - Tailscale IP: $tsIP"
               Start-Sleep -Seconds 300
           }
