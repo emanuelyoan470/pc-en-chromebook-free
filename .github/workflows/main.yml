@@ -25,13 +25,13 @@ jobs:
 
       - name: Create RDP User
         run: |
-          $password = "SkyroPass2026!"
-          $securePass = ConvertTo-SecureString$password -AsPlainText -Force
-          New-LocalUser -Name "Skyro" -Password $securePass -AccountNeverExpires -ErrorAction SilentlyContinue
+          $pass = "SkyroPass2026!"
+          $secPass = ConvertTo-SecureString$pass -AsPlainText -Force
+          New-LocalUser -Name "Skyro" -Password $secPass -AccountNeverExpires -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Administrators" -Member "Skyro" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Skyro" -ErrorAction SilentlyContinue
           
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=$password"
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=$pass"
 
       - name: Setup Direct Tunnel Gateway
         run: |
