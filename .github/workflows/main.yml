@@ -8,63 +8,43 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 3600
 
-    defaults:
-      run:
-        shell: powershell
-
     steps:
       - name: Configure Core RDP Settings
+        shell: cmd
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
-          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
-
-          Restart-Service -Name TermService -Force
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v SecurityLayer /t REG_DWORD /d 0 /f
+          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
+          net start TermService /y
 
       - name: Create RDP User
+        shell: cmd
         run: |
-          Add-Type -AssemblyName System.Security
-          $charSet = @{
-              Upper   = [char[]](65..90)
-              Lower   = [char[]](97..122)
-              Number  = [char[]](48..57)
-              Special = ([char[]](33..47) + [char[]](58..64) + [char[]](91..96) + [char[]](123..126))
-          }
-          $rawPass = @()
-          $rawPass +=$charSet.Upper | Get-Random -Count 4
-          $rawPass +=$charSet.Lower | Get-Random -Count 4
-          $rawPass +=$charSet.Number | Get-Random -Count 4
-          $rawPass +=$charSet.Special | Get-Random -Count 4
-          $pass = -join ($rawPass | Sort-Object { Get-Random })
-
-          $secPass = ConvertTo-SecureString$pass -AsPlainText -Force
-          New-LocalUser -Name "Skyro" -Password $secPass -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "Skyro"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Skyro"
-
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=$pass"
+          net user Skyro P@ssw0rdSkyro2026! /add /expires:never
+          net localgroup Administrators Skyro /add
+          net localgroup "Remote Desktop Users" Skyro /add
+          echo RDP_PASS=P@ssw0rdSkyro2026! >> %GITHUB_ENV%
 
       - name: Install Tailscale
+        shell: powershell
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
-          
           Invoke-WebRequest -Uri $tsUrl -OutFile$installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
 
       - name: Establish Tailscale Connection
+        shell: powershell
         run: |
           Write-Host "`n------------------------------------------------------"
-          Write-Host "ABRE EL SIGUIENTE ENLACE EN TU NAVEGADOR PARA AUTORIZAR:"
+          Write-Host "ABRE EL ENLACE QUE APARECERÁ EN PANTALLA PARA INICIAR SESIÓN:"
           Write-Host "------------------------------------------------------`n"
-
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-runner-$env:GITHUB_RUN_ID"
 
       - name: Maintain Connection
+        shell: powershell
         run: |
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           Write-Host "`n======================================================"
@@ -73,7 +53,6 @@ jobs:
           Write-Host " Usuario      : Skyro"
           Write-Host " Contraseña   : $env:RDP_PASS"
           Write-Host "======================================================`n"
-          
           while ($true) {
               Write-Host "[$(Get-Date)] RDP Activo - Tailscale IP:$tsIP"
               Start-Sleep -Seconds 300
