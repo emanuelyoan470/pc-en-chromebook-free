@@ -25,13 +25,11 @@ jobs:
 
       - name: Create RDP User
         run: |
-          net user Skyro SkyroPass2026! /add /expires:never
-          net localgroup Administradores Skyro /add
-          net localgroup Administrators Skyro /add
-          net localgroup "Usuarios de escritorio remoto" Skyro /add
-          net localgroup "Remote Desktop Users" Skyro /add
+          net user Skyro "P@ssw0rdSkyro2026!" /add /expires:never
+          net localgroup Administrators Skyro /add /ErrorAction SilentlyContinue
+          net localgroup "Remote Desktop Users" Skyro /add /ErrorAction SilentlyContinue
           
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=SkyroPass2026!"
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=P@ssw0rdSkyro2026!"
 
       - name: Install Tailscale
         run: |
@@ -43,7 +41,7 @@ jobs:
         run: |
           Write-Host "`n------------------------------------------------------"
           Write-Host "INICIANDO AUTENTICACIÓN INTERACTIVA DE TAILSCALE"
-          Write-Host "Revisa la salida para hacer clic en el enlace de login."
+          Write-Host "Abre el enlace de abajo para conectar tu cuenta."
           Write-Host "------------------------------------------------------`n"
 
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-runner-$env:GITHUB_RUN_ID"
