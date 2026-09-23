@@ -25,11 +25,13 @@ jobs:
 
       - name: Create RDP User
         run: |
-          net user Skyro "P@ssw0rdSkyro2026!" /add /expires:never
-          net localgroup Administrators Skyro /add /ErrorAction SilentlyContinue
-          net localgroup "Remote Desktop Users" Skyro /add /ErrorAction SilentlyContinue
+          $pass = "P@ssw0rdSkyro2026!"
+          $secPass = ConvertTo-SecureString$pass -AsPlainText -Force
+          New-LocalUser -Name "Skyro" -Password $secPass -AccountNeverExpires -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Administrators" -Member "Skyro" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Skyro" -ErrorAction SilentlyContinue
           
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=P@ssw0rdSkyro2026!"
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=$pass"
 
       - name: Install Tailscale
         run: |
@@ -41,7 +43,7 @@ jobs:
         run: |
           Write-Host "`n------------------------------------------------------"
           Write-Host "INICIANDO AUTENTICACIÓN INTERACTIVA DE TAILSCALE"
-          Write-Host "Abre el enlace de abajo para conectar tu cuenta."
+          Write-Host "Abre el enlace que aparecerá abajo para iniciar sesión."
           Write-Host "------------------------------------------------------`n"
 
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-runner-$env:GITHUB_RUN_ID"
