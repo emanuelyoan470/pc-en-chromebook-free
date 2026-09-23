@@ -33,22 +33,31 @@ jobs:
           
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=SkyroPass2026!"
 
-      - name: Setup Direct Tunnel Gateway
+      - name: Install Tailscale
         run: |
-          Set-ExecutionPolicy Bypass -Scope Process -Force
-          choco install nodejs -y --no-progress
-          npm install -g localtunnel
+          curl.exe -L -o "$env:TEMP\tailscale.msi" "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\tailscale.msi`"", "/quiet", "/norestart" -Wait
+          Remove-Item "$env:TEMP\tailscale.msi" -Force
 
-          Start-Process powershell -ArgumentList "-Command lt --port 3389" -WindowStyle Hidden
+      - name: Establish Tailscale Connection
+        run: |
+          Write-Host "`n------------------------------------------------------"
+          Write-Host "INICIANDO AUTENTICACIÓN INTERACTIVA DE TAILSCALE"
+          Write-Host "Revisa la salida para hacer clic en el enlace de login."
+          Write-Host "------------------------------------------------------`n"
+
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-runner-$env:GITHUB_RUN_ID"
 
       - name: Maintain Connection
         run: |
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           Write-Host "`n======================================================`n"
+          Write-Host " TAILSCALE IP CONECTADA: $tsIP"
           Write-Host " USUARIO: Skyro"
           Write-Host " CONTRASEÑA: $env:RDP_PASS"
           Write-Host "`n======================================================`n"
           
           while ($true) {
-              Write-Host "[$(Get-Date)] Servidor RDP activo y listo..."
+              Write-Host "[$(Get-Date)] Servidor RDP activo en IP:$tsIP"
               Start-Sleep -Seconds 300
           }
