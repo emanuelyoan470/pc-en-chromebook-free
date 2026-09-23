@@ -16,7 +16,8 @@ jobs:
           reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
           reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v SecurityLayer /t REG_DWORD /d 0 /f
           netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
-          net start TermService
+          sc query TermService | find "RUNNING" >nul || net start TermService
+          exit /b 0
 
       - name: Create RDP User
         shell: cmd
