@@ -26,31 +26,19 @@ jobs:
 
       - name: Create RDP User with Secure Password
         run: |
-          Add-Type -AssemblyName System.Security
-          $charSet = @{
-              Upper   = [char[]](65..90)
-              Lower   = [char[]](97..122)
-              Number  = [char[]](48..57)
-              Special = ([char[]](33..47) + [char[]](58..64) + [char[]](91..96) + [char[]](123..126))
-          }
-          $rawPassword = @()
-          $rawPassword +=$charSet.Upper | Get-Random -Count 4
-          $rawPassword +=$charSet.Lower | Get-Random -Count 4
-          $rawPassword +=$charSet.Number | Get-Random -Count 4
-          $rawPassword +=$charSet.Special | Get-Random -Count 4
-          $password = -join ($rawPassword | Sort-Object { Get-Random })
+          $pass = "SkyroPass2026!#Secure"
           
-          $securePass = ConvertTo-SecureString$password -AsPlainText -Force
-          New-LocalUser -Name "Skyro" -Password $securePass -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "Skyro"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Skyro"
+          $comp = [ADSI]"WinNT://$env:COMPUTERNAME"
+          $user =$comp.Create("User", "Skyro")
+          $user.SetPassword($pass)$user.SetInfo()
           
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=$password"
+          $adminGroup = [ADSI]"WinNT://$env:COMPUTERNAME/Administrators,group"
+          $adminGroup.Add("WinNT://$env:COMPUTERNAME/Skyro")
           
-          if (-not (Get-LocalUser -Name "Skyro")) {
-              Write-Error "User creation failed"
-              exit 1
-          }
+          $rdpGroup = [ADSI]"WinNT://$env:COMPUTERNAME/Remote Desktop Users,group"
+          $rdpGroup.Add("WinNT://$env:COMPUTERNAME/Skyro")
+          
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=$pass"
 
       - name: Install Tailscale
         run: |
