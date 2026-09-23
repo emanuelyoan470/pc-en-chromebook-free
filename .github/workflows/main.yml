@@ -22,22 +22,20 @@ jobs:
       - name: Generate Random Password and Create RDP User
         shell: powershell
         run: |
-          # Generar contrasena aleatoria de 20 caracteres
           Add-Type -AssemblyName System.Web
-          $password = [System.Web.Security.Membership]::GeneratePassword(20, 4)
-
-          # Guardar en variable de entorno para los siguientes pasos
+          $password = [System.Web.Security.Membership]::GeneratePassword(16, 4)
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-          # Mostrar en el log
           Write-Host "======================================================"
           Write-Host " CONTRASENA GENERADA: $password"
           Write-Host "======================================================"
 
-          # Crear usuario con la contrasena aleatoria
-          net user Skyro "$password" /add /expires:never
-          net localgroup Administrators Skyro /add
-          net localgroup "Remote Desktop Users" Skyro /add
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "Skyro" -Password $securePass -PasswordNeverExpires -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "Skyro"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Skyro"
+
+          Write-Host "Usuario Skyro creado correctamente."
 
       - name: Install Tailscale
         shell: powershell
@@ -69,7 +67,6 @@ jobs:
           Write-Host " Contrasena   : $env:RDP_PASS"
           Write-Host "======================================================`n"
           Write-Host "Copia la IP y la contrasena a tu extension RDP."
-          Write-Host "La maquina se mantendra activa hasta el timeout (6 horas).`n"
 
           while ($true) {
               Write-Host "[$(Get-Date)] RDP Activo - IP: $tsIP"
