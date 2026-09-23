@@ -19,17 +19,16 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
-          netsh advfirewall firewall add rule name="WEB" dir=in action=allow protocol=TCP localport=8080
           Restart-Service -Name TermService -Force
 
       - name: Create RDP User
         run: |
           $password = "SkyroPass2026!"
-          $securePass = ConvertTo-SecureString$password -AsPlainText -Force
+          $securePass = ConvertTo-SecureString "SkyroPass2026!" -AsPlainText -Force
           New-LocalUser -Name "Skyro" -Password $securePass -AccountNeverExpires -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Administrators" -Member "Skyro" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Skyro" -ErrorAction SilentlyContinue
-          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=$password"
 
       - name: Install Tailscale
         run: |
@@ -43,12 +42,7 @@ jobs:
         run: |
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-
-      - name: Download Web-RDP Binary
-        run: |
-          # Descarga un cliente/pasarela Web RDP portátil en un solo ejecutable
-          Invoke-WebRequest -Uri "https://github.com/astelle/mRemoteNG/releases/download/v1.76.20/mRemoteNG-Portable-1.76.20.24669.zip" -OutFile "$env:TEMP\mremote.zip" -ErrorAction SilentlyContinue
+          Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$tsIP"
 
       - name: Maintain Connection
         run: |
