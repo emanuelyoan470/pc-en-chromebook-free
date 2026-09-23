@@ -67,15 +67,12 @@ jobs:
           Set-ExecutionPolicy Bypass -Scope Process -Force
           [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
           
-          # Instalar componentes Web
           choco install ultravnc python3 -y --no-progress
           
-          # Iniciar servicio VNC
           $vncPath = "C:\Program Files\uvnc bvba\UltraVNC"
           Start-Process -FilePath "$vncPath\winvnc.exe" -ArgumentList "-install" -Wait
           Start-Service -Name "uvnc_service" -ErrorAction SilentlyContinue
 
-          # Configurar noVNC para acceso Web directo
           pip install numpy websockify
           git clone https://github.com/novnc/noVNC.git C:\noVNC
           Start-Process python -ArgumentList "-m websockify --web C:\noVNC 6080 localhost:5900" -WindowStyle Hidden
