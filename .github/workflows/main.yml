@@ -19,13 +19,25 @@ jobs:
           sc query TermService | find "RUNNING" >nul || net start TermService
           exit /b 0
 
-      - name: Create RDP User
-        shell: cmd
+      - name: Generate Random Password and Create RDP User
+        shell: powershell
         run: |
-          net user Skyro "P@ssw0rdSkyro2026!" /add /expires:never /y
+          # Generar contrasena aleatoria de 20 caracteres
+          Add-Type -AssemblyName System.Web
+          $password = [System.Web.Security.Membership]::GeneratePassword(20, 4)
+
+          # Guardar en variable de entorno para los siguientes pasos
+          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
+
+          # Mostrar en el log
+          Write-Host "======================================================"
+          Write-Host " CONTRASENA GENERADA: $password"
+          Write-Host "======================================================"
+
+          # Crear usuario con la contrasena aleatoria
+          net user Skyro "$password" /add /expires:never
           net localgroup Administrators Skyro /add
           net localgroup "Remote Desktop Users" Skyro /add
-          echo RDP_PASS=P@ssw0rdSkyro2026!>> %GITHUB_ENV%
 
       - name: Install Tailscale
         shell: powershell
@@ -40,21 +52,26 @@ jobs:
         shell: powershell
         run: |
           Write-Host "`n------------------------------------------------------"
-          Write-Host "ABRE EL SIGUIENTE ENLACE EN TU NAVEGADOR PARA AUTORIZAR:"
+          Write-Host "CONECTANDO TAILSCALE..."
           Write-Host "------------------------------------------------------`n"
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-runner-$env:GITHUB_RUN_ID" --authkey="${{ secrets.TAILSCALE_AUTHKEY }}"
 
-      - name: Maintain Connection
+      - name: Show Connection Info and Maintain
         shell: powershell
         run: |
+          Start-Sleep -Seconds 5
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           Write-Host "`n======================================================"
           Write-Host " CONEXION RDP ESTABLECIDA"
+          Write-Host "======================================================"
           Write-Host " Tailscale IP : $tsIP"
           Write-Host " Usuario      : Skyro"
           Write-Host " Contrasena   : $env:RDP_PASS"
           Write-Host "======================================================`n"
+          Write-Host "Copia la IP y la contrasena a tu extension RDP."
+          Write-Host "La maquina se mantendra activa hasta el timeout (6 horas).`n"
+
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP Activo - Tailscale IP: $tsIP"
+              Write-Host "[$(Get-Date)] RDP Activo - IP: $tsIP"
               Start-Sleep -Seconds 300
           }
