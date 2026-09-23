@@ -1,4 +1,4 @@
-name: RDP Web ChromeOS
+name: RDP Web (noVNC for ChromeOS)
 
 on:
   workflow_dispatch:
@@ -13,47 +13,84 @@ jobs:
         shell: powershell
 
     steps:
-      - name: Configure RDP and Firewall
+      - name: Configure Core RDP Settings
         run: |
           Set-ExecutionPolicy Bypass -Scope Process -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+
+          netsh advfirewall firewall delete rule name="RDP-Tailscale"
+          netsh advfirewall firewall delete rule name="noVNC-Web"
+
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+          netsh advfirewall firewall add rule name="noVNC-Web" dir=in action=allow protocol=TCP localport=6080
+
           Restart-Service -Name TermService -Force
 
-      - name: Create RDP User
+      - name: Create RDP User with Secure Password
         run: |
           $password = "SkyroPass2026!"
           $securePass = ConvertTo-SecureString "SkyroPass2026!" -AsPlainText -Force
           New-LocalUser -Name "Skyro" -Password $securePass -AccountNeverExpires -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Administrators" -Member "Skyro" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Skyro" -ErrorAction SilentlyContinue
+          
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=$password"
 
       - name: Install Tailscale
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
+          
           Invoke-WebRequest -Uri $tsUrl -OutFile$installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
 
-      - name: Connect Tailscale
+      - name: Establish Tailscale Connection
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
-          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID$tsIP = $null$retries = 0
+          while (-not $tsIP -and$retries -lt 10) {
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+              $retries++
+          }
+          
+          if (-not $tsIP) {
+              Write-Error "Tailscale IP not assigned. Exiting."
+              exit 1
+          }
           Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$tsIP"
+
+      - name: Install and Setup Web-VNC Gateway (noVNC)
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+          
+          # Instalar componentes Web
+          choco install ultravnc python3 -y --no-progress
+          
+          # Iniciar servicio VNC
+          $vncPath = "C:\Program Files\uvnc bvba\UltraVNC"
+          Start-Process -FilePath "$vncPath\winvnc.exe" -ArgumentList "-install" -Wait
+          Start-Service -Name "uvnc_service" -ErrorAction SilentlyContinue
+
+          # Configurar noVNC para acceso Web directo
+          pip install numpy websockify
+          git clone https://github.com/novnc/noVNC.git C:\noVNC
+          Start-Process python -ArgumentList "-m websockify --web C:\noVNC 6080 localhost:5900" -WindowStyle Hidden
 
       - name: Maintain Connection
         run: |
+          $webUrl = "http://$($env:TAILSCALE_IP):6080/vnc.html"
           Write-Host "`n======================================================`n"
-          Write-Host " CONEXION RDP LISTA"
-          Write-Host " Tailscale IP: $env:TAILSCALE_IP"
+          Write-Host " LINK PARA TU CHROMEBOOK:"
+          Write-Host " $webUrl"
           Write-Host " Usuario: Skyro"
           Write-Host " Password: $env:RDP_PASS"
           Write-Host "`n======================================================`n"
           
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP Activo - IP:$env:TAILSCALE_IP"
+              Write-Host "[$(Get-Date)] Servidor Web Activo en:$webUrl"
               Start-Sleep -Seconds 300
           }
