@@ -1,4 +1,4 @@
-name: RDP
+name: RDP con Guacamole Web
 
 on:
   workflow_dispatch:
@@ -19,22 +19,17 @@ jobs:
           sc query TermService | find "RUNNING" >nul || net start TermService
           exit /b 0
 
-      - name: Generate Random Password and Create RDP User
+      - name: Generate Password and Create User
         shell: powershell
         run: |
           Add-Type -AssemblyName System.Web
           $password = [System.Web.Security.Membership]::GeneratePassword(16, 4)
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
-
-          Write-Host "======================================================"
-          Write-Host " CONTRASENA GENERADA: $password"
-          Write-Host "======================================================"
-
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          New-LocalUser -Name "Skyro" -Password $securePass -PasswordNeverExpires -AccountNeverExpires
+          Write-Host "CONTRASENA: $password"
+          $sec = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "Skyro" -Password $sec -PasswordNeverExpires -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "Skyro"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Skyro"
-          Write-Host "Usuario Skyro creado correctamente."
 
       - name: Install Tailscale
         shell: powershell
@@ -45,34 +40,61 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
 
-      - name: Establish Tailscale Connection
+      - name: Connect Tailscale
         shell: powershell
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-runner-$env:GITHUB_RUN_ID" --authkey="${{ secrets.TAILSCALE_AUTHKEY }}"
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-rdp" --authkey="${{ secrets.TAILSCALE_AUTHKEY }}"
+          Start-Sleep -Seconds 10
 
-      - name: Show RDP Connection Info and Maintain
+      - name: Setup WSL2 and Docker
         shell: powershell
         run: |
-          Start-Sleep -Seconds 5
+          wsl --install --no-distribution
+          wsl --set-default-version 2
+          wsl --update
+          Start-Sleep -Seconds 20
+
+      - name: Install Ubuntu in WSL
+        shell: powershell
+        run: |
+          wsl --install -d Ubuntu --no-launch
+          Start-Sleep -Seconds 60
+          wsl -d Ubuntu -- echo "Ubuntu listo"
+
+      - name: Install Docker in WSL Ubuntu
+        shell: powershell
+        run: |
+          wsl -d Ubuntu -u root -- bash -c "apt-get update && apt-get install -y docker.io"
+          Start-Sleep -Seconds 10
+
+      - name: Start Guacamole Containers
+        shell: powershell
+        run: |
+          wsl -d Ubuntu -u root -- bash -c "docker run -d --name guacd --restart=always -p 4822:4822 guacamole/guacd"
+          Start-Sleep -Seconds 15
+          wsl -d Ubuntu -u root -- bash -c "docker run -d --name guacamole --restart=always -p 8080:8080 --link guacd:guacd -e GUACD_HOSTNAME=guacd -e EXTENSIONS=auth-quickconnect guacamole/guacamole"
+          Start-Sleep -Seconds 20
+          wsl -d Ubuntu -u root -- docker ps
+
+      - name: Show Info and Maintain
+        shell: powershell
+        run: |
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           Write-Host ""
           Write-Host "======================================================"
-          Write-Host " RDP LISTO - DATOS DE CONEXION"
+          Write-Host " GUACAMOLE LISTO"
           Write-Host "======================================================"
-          Write-Host " Host / IP   : $tsIP"
-          Write-Host " Port        : 3389"
-          Write-Host " Usuario     : Skyro"
-          Write-Host " Contrasena  : $env:RDP_PASS"
+          Write-Host " URL WEB  : http://${tsIP}:8080/guacamole/"
+          Write-Host " Login    : guacadmin / guacadmin"
           Write-Host ""
-          Write-Host " URI RDP directo:"
-          Write-Host "   rdp://$tsIP:3389"
-          Write-Host ""
-          Write-Host " Comando mstsc:"
-          Write-Host "   mstsc /v:$tsIP:3389"
+          Write-Host " RDP para agregar en Guacamole:"
+          Write-Host "   Host: localhost"
+          Write-Host "   Port: 3389"
+          Write-Host "   User: Skyro"
+          Write-Host "   Pass: $env:RDP_PASS"
           Write-Host "======================================================"
           Write-Host ""
-
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP activo en $tsIP"
+              Write-Host "[$(Get-Date)] Activo en $tsIP"
               Start-Sleep -Seconds 300
           }
