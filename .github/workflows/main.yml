@@ -1,4 +1,4 @@
-name: RDP
+name: RDP con Guacamole Web
 
 on:
   workflow_dispatch:
@@ -34,8 +34,7 @@ jobs:
           New-LocalUser -Name "Skyro" -Password $securePass -PasswordNeverExpires -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "Skyro"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Skyro"
-
-          Write-Host "Usuario Skyro creado correctamente."
+          Write-Host "Usuario Skyro creado."
 
       - name: Install Tailscale
         shell: powershell
@@ -49,10 +48,33 @@ jobs:
       - name: Establish Tailscale Connection
         shell: powershell
         run: |
-          Write-Host "`n------------------------------------------------------"
-          Write-Host "CONECTANDO TAILSCALE..."
-          Write-Host "------------------------------------------------------`n"
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-runner-$env:GITHUB_RUN_ID" --authkey="${{ secrets.TAILSCALE_AUTHKEY }}"
+
+      - name: Install WSL and Docker (para Guacamole)
+        shell: powershell
+        run: |
+          # Instalar WSL2
+          wsl --install --no-distribution
+          wsl --set-default-version 2
+          # Instalar Ubuntu
+          wsl --install -d Ubuntu --no-launch
+          Start-Sleep -Seconds 30
+          # Instalar Docker dentro de WSL
+          wsl -d Ubuntu -- bash -c "sudo apt update && sudo apt install -y docker.io"
+          Write-Host "WSL y Docker instalados."
+
+      - name: Start Guacamole in Docker (WSL)
+        shell: powershell
+        run: |
+          $guacCmd = @'
+sudo docker run -d --name guacd --restart=always -p 4822:4822 guacamole/guacd
+sudo docker run -d --name guacamole --restart=always --link guacd:guacd -p 8080:8080 -e GUACD_HOSTNAME=guacd -e EXTENSIONS=auth-quickconnect guacamole/guacamole
+'@
+          $guacCmd | Out-File -FilePath "$env:TEMP\start_guac.sh" -Encoding ASCII
+          wsl -d Ubuntu -- bash /mnt/c/Users/runneradmin/AppData/Local/Temp/start_guac.sh
+          Start-Sleep -Seconds 20
+          wsl -d Ubuntu -- docker ps
+          Write-Host "Guacamole iniciado en puerto 8080."
 
       - name: Show Connection Info and Maintain
         shell: powershell
@@ -60,15 +82,24 @@ jobs:
           Start-Sleep -Seconds 5
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           Write-Host "`n======================================================"
-          Write-Host " CONEXION RDP ESTABLECIDA"
+          Write-Host " CONEXION LISTA"
           Write-Host "======================================================"
           Write-Host " Tailscale IP : $tsIP"
-          Write-Host " Usuario      : Skyro"
+          Write-Host " Usuario RDP  : Skyro"
           Write-Host " Contrasena   : $env:RDP_PASS"
+          Write-Host ""
+          Write-Host " CLIENTE WEB (Guacamole):"
+          Write-Host "   http://${tsIP}:8080/guacamole/"
+          Write-Host "   Login: guacadmin / guacadmin"
+          Write-Host ""
+          Write-Host " Despues de entrar, agrega conexion RDP:"
+          Write-Host "   Hostname: localhost"
+          Write-Host "   Port: 3389"
+          Write-Host "   User: Skyro"
+          Write-Host "   Pass: $env:RDP_PASS"
           Write-Host "======================================================`n"
-          Write-Host "Copia la IP y la contrasena a tu extension RDP."
 
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP Activo - IP: $tsIP"
+              Write-Host "[$(Get-Date)] Activo - IP: $tsIP"
               Start-Sleep -Seconds 300
           }
