@@ -1,4 +1,4 @@
-name: RDP con Guacamole HTTPS
+name: RDP
 
 on:
   workflow_dispatch:
@@ -10,156 +10,104 @@ jobs:
 
     steps:
       - name: Configure Core RDP Settings
-        shell: cmd
         run: |
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v SecurityLayer /t REG_DWORD /d 0 /f
-          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
-          sc query TermService | find "RUNNING" >nul || net start TermService
-          exit /b 0
+          # Enable Remote Desktop and disable Network Level Authentication (if needed)
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                             -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "SecurityLayer" -Value 0 -Force
 
-      - name: Generate Password and Create User
-        shell: powershell
+          # Remove any existing rule with the same name to avoid duplication
+          netsh advfirewall firewall delete rule name="RDP-Tailscale"
+          
+          # For testing, allow any incoming connection on port 3389
+          netsh advfirewall firewall add rule name="RDP-Tailscale" `
+            dir=in action=allow protocol=TCP localport=3389
+
+          # (Optional) Restart the Remote Desktop service to ensure changes take effect
+          Restart-Service -Name TermService -Force
+
+      - name: Create RDP User with Secure Password
         run: |
-          Add-Type -AssemblyName System.Web
-          $password = [System.Web.Security.Membership]::GeneratePassword(16, 4)
-          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
-          Write-Host "CONTRASENA: $password"
-          $sec = ConvertTo-SecureString $password -AsPlainText -Force
-          New-LocalUser -Name "Skyro" -Password $sec -PasswordNeverExpires -AccountNeverExpires
+          Add-Type -AssemblyName System.Security
+          $charSet = @{
+              Upper   = [char[]](65..90)      # A-Z
+              Lower   = [char[]](97..122)     # a-z
+              Number  = [char[]](48..57)      # 0-9
+              Special = ([char[]](33..47) + [char[]](58..64) +
+                         [char[]](91..96) + [char[]](123..126)) # Special characters
+          }
+          $rawPassword = @()
+          $rawPassword += $charSet.Upper | Get-Random -Count 4
+          $rawPassword += $charSet.Lower | Get-Random -Count 4
+          $rawPassword += $charSet.Number | Get-Random -Count 4
+          $rawPassword += $charSet.Special | Get-Random -Count 4
+          $password = -join ($rawPassword | Sort-Object { Get-Random })
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "Skyro" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "Skyro"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Skyro"
+          
+          echo "RDP_CREDS=User: Skyro | Password: $password" >> $env:GITHUB_ENV
+          
+          if (-not (Get-LocalUser -Name "Skyro")) {
+              Write-Error "User creation failed"
+              exit 1
+          }
 
       - name: Install Tailscale
-        shell: powershell
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
+          
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
 
-      - name: Connect Tailscale
-        shell: powershell
+      - name: Establish Tailscale Connection
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-rdp" --authkey="${{ secrets.TAILSCALE_AUTHKEY }}"
-          Start-Sleep -Seconds 15
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" status
-
-      - name: Enable HTTPS in Tailscale
-        shell: powershell
-        run: |
-          # Habilitar HTTPS y MagicDNS en el tailnet (necesario para tailscale serve)
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" cert --help > $null 2>&1
-          Write-Host "Tailscale listo para serve"
-
-      - name: Setup WSL2
-        shell: powershell
-        run: |
-          wsl --install --no-distribution
-          wsl --set-default-version 2
-          wsl --update
-          Start-Sleep -Seconds 30
-
-      - name: Install Ubuntu in WSL
-        shell: powershell
-        run: |
-          wsl --install -d Ubuntu --no-launch
-          Start-Sleep -Seconds 90
-          wsl -d Ubuntu -- echo "Ubuntu listo"
-
-      - name: Install Docker in WSL Ubuntu
-        shell: powershell
-        run: |
-          wsl -d Ubuntu -u root -- bash -c "apt-get update && apt-get install -y docker.io"
-          Start-Sleep -Seconds 15
-          wsl -d Ubuntu -u root -- docker --version
-
-      - name: Start Guacamole Containers
-        shell: powershell
-        run: |
-          wsl -d Ubuntu -u root -- bash -c "docker run -d --name guacd --restart=always -p 4822:4822 guacamole/guacd"
-          Start-Sleep -Seconds 20
-          wsl -d Ubuntu -u root -- bash -c "docker run -d --name guacamole --restart=always -p 8080:8080 --link guacd:guacd -e GUACD_HOSTNAME=guacd guacamole/guacamole"
-          Start-Sleep -Seconds 30
-          wsl -d Ubuntu -u root -- docker ps
-
-      - name: Port Forward Windows to WSL
-        shell: powershell
-        run: |
-          # Obtener IP interna de WSL
-          $wslIP = (wsl -d Ubuntu hostname -I).Trim().Split()[0]
-          Write-Host "WSL IP: $wslIP"
-
-          # Redirigir puerto 8080 de Windows a WSL
-          netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=8080 connectaddress=$wslIP connectport=8080
-
-          # Verificar
-          netsh interface portproxy show all
-
-          # Probar localmente
-          Start-Sleep -Seconds 5
-          try {
-            $test = Invoke-WebRequest -Uri "http://localhost:8080/guacamole/" -UseBasicParsing -TimeoutSec 10
-            Write-Host "Prueba local OK: HTTP $($test.StatusCode)"
-          } catch {
-            Write-Host "Prueba local fallo: $_"
+          # Bring up Tailscale with the provided auth key and set a unique hostname
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          
+          # Wait for Tailscale to assign an IP
+          $tsIP = $null
+          $retries = 0
+          while (-not $tsIP -and $retries -lt 10) {
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+              $retries++
           }
-
-      - name: Setup Tailscale Serve (HTTPS Proxy)
-        shell: powershell
+          
+          if (-not $tsIP) {
+              Write-Error "Tailscale IP not assigned. Exiting."
+              exit 1
+          }
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+      
+      - name: Verify RDP Accessibility
         run: |
-          # Configurar tailscale serve para exponer localhost:8080 via HTTPS
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" serve --bg --https=443 http://localhost:8080
-          Start-Sleep -Seconds 10
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+          
+          # Test connectivity using Test-NetConnection against the Tailscale IP on port 3389
+          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
+          if (-not $testResult.TcpTestSucceeded) {
+              Write-Error "TCP connection to RDP port 3389 failed"
+              exit 1
+          }
+          Write-Host "TCP connectivity successful!"
 
-          # Obtener el nombre DNS de Tailscale
-          $tsName = (& "$env:ProgramFiles\Tailscale\tailscale.exe" status --json | ConvertFrom-Json).Self.DNSName
-          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-
-          Write-Host ""
-          Write-Host "======================================================"
-          Write-Host " GUACAMOLE HTTPS LISTO"
-          Write-Host "======================================================"
-          Write-Host " URL HTTPS    : https://$tsName"
-          Write-Host " URL HTTP     : http://${tsIP}:8080/guacamole/"
-          Write-Host " Login        : guacadmin / guacadmin"
-          Write-Host ""
-          Write-Host " RDP para agregar en Guacamole:"
-          Write-Host "   Host: localhost"
-          Write-Host "   Port: 3389"
-          Write-Host "   User: Skyro"
-          Write-Host "   Pass: $env:RDP_PASS"
-          Write-Host "======================================================"
-
-          # Guardar nombre DNS en env
-          echo "TS_NAME=$tsName" >> $env:GITHUB_ENV
-
-      - name: Show Info and Maintain
-        shell: powershell
+      - name: Maintain Connection
         run: |
-          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-          $tsName = (& "$env:ProgramFiles\Tailscale\tailscale.exe" status --json | ConvertFrom-Json).Self.DNSName
-
-          Write-Host ""
-          Write-Host "======================================================"
-          Write-Host " ACCESO A GUACAMOLE"
-          Write-Host "======================================================"
-          Write-Host " HTTPS: https://$tsName"
-          Write-Host " HTTP : http://${tsIP}:8080/guacamole/"
-          Write-Host " Login: guacadmin / guacadmin"
-          Write-Host ""
-          Write-Host " RDP:"
-          Write-Host "   Host: localhost"
-          Write-Host "   Port: 3389"
-          Write-Host "   User: Skyro"
-          Write-Host "   Pass: $env:RDP_PASS"
-          Write-Host "======================================================"
-          Write-Host ""
-
+          Write-Host "`n=== RDP ACCESS ==="
+          Write-Host "Address: $env:TAILSCALE_IP"
+          Write-Host "Username: Skyro"
+          Write-Host "Password: $(echo $env:RDP_CREDS)"
+          Write-Host "==================`n"
+          
+          # Keep runner active indefinitely (or until manually cancelled)
           while ($true) {
-              Write-Host "[$(Get-Date)] Activo - HTTPS: https://$tsName"
+              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
               Start-Sleep -Seconds 300
           }
