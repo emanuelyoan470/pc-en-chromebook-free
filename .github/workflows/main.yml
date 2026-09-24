@@ -45,8 +45,9 @@ jobs:
         run: |
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-rdp" --authkey="${{ secrets.TAILSCALE_AUTHKEY }}"
           Start-Sleep -Seconds 10
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
 
-      - name: Setup WSL2 and Docker
+      - name: Setup WSL2
         shell: powershell
         run: |
           wsl --install --no-distribution
@@ -58,23 +59,52 @@ jobs:
         shell: powershell
         run: |
           wsl --install -d Ubuntu --no-launch
-          Start-Sleep -Seconds 60
+          Start-Sleep -Seconds 90
           wsl -d Ubuntu -- echo "Ubuntu listo"
 
       - name: Install Docker in WSL Ubuntu
         shell: powershell
         run: |
           wsl -d Ubuntu -u root -- bash -c "apt-get update && apt-get install -y docker.io"
-          Start-Sleep -Seconds 10
+          Start-Sleep -Seconds 15
+          wsl -d Ubuntu -u root -- docker --version
 
       - name: Start Guacamole Containers
         shell: powershell
         run: |
           wsl -d Ubuntu -u root -- bash -c "docker run -d --name guacd --restart=always -p 4822:4822 guacamole/guacd"
-          Start-Sleep -Seconds 15
-          wsl -d Ubuntu -u root -- bash -c "docker run -d --name guacamole --restart=always -p 8080:8080 --link guacd:guacd -e GUACD_HOSTNAME=guacd -e EXTENSIONS=auth-quickconnect guacamole/guacamole"
           Start-Sleep -Seconds 20
+          wsl -d Ubuntu -u root -- bash -c "docker run -d --name guacamole --restart=always -p 8080:8080 --link guacd:guacd -e GUACD_HOSTNAME=guacd guacamole/guacamole"
+          Start-Sleep -Seconds 30
           wsl -d Ubuntu -u root -- docker ps
+
+      - name: Redirect Port 8080 to WSL
+        shell: powershell
+        run: |
+          # Obtener IP interna de WSL2
+          $wslIP = (wsl -d Ubuntu hostname -I).Trim().Split()[0]
+          Write-Host "WSL IP: $wslIP"
+
+          # Redirigir puerto 8080 de Windows a WSL
+          netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=8080 connectaddress=$wslIP connectport=8080
+
+          # Abrir puerto en firewall de Windows (todas las reglas posibles)
+          New-NetFirewallRule -DisplayName "Guacamole 8080 In" -Direction Inbound -LocalPort 8080 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue
+          New-NetFirewallRule -DisplayName "Guacamole 8080 Out" -Direction Outbound -LocalPort 8080 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue
+          New-NetFirewallRule -DisplayName "Guacamole 4822 In" -Direction Inbound -LocalPort 4822 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue
+
+          # Verificar que la regla quedó bien
+          Write-Host "`nReglas de portproxy:"
+          netsh interface portproxy show all
+
+          # Probar que responde localmente
+          Start-Sleep -Seconds 5
+          try {
+            $test = Invoke-WebRequest -Uri "http://localhost:8080/guacamole/" -UseBasicParsing -TimeoutSec 10
+            Write-Host "Prueba local OK: HTTP $($test.StatusCode)"
+          } catch {
+            Write-Host "Prueba local fallo: $_"
+          }
 
       - name: Show Info and Maintain
         shell: powershell
@@ -93,6 +123,8 @@ jobs:
           Write-Host "   User: Skyro"
           Write-Host "   Pass: $env:RDP_PASS"
           Write-Host "======================================================"
+          Write-Host ""
+          Write-Host "Esperando conexion. NO cierres esta ventana."
           Write-Host ""
           while ($true) {
               Write-Host "[$(Get-Date)] Activo en $tsIP"
