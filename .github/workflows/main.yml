@@ -1,4 +1,4 @@
-name: RDP con Guacamole Web
+name: RDP con Guacamole HTTPS
 
 on:
   workflow_dispatch:
@@ -44,8 +44,16 @@ jobs:
         shell: powershell
         run: |
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --hostname="gh-rdp" --authkey="${{ secrets.TAILSCALE_AUTHKEY }}"
-          Start-Sleep -Seconds 10
+          Start-Sleep -Seconds 15
           & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" status
+
+      - name: Enable HTTPS in Tailscale
+        shell: powershell
+        run: |
+          # Habilitar HTTPS y MagicDNS en el tailnet (necesario para tailscale serve)
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" cert --help > $null 2>&1
+          Write-Host "Tailscale listo para serve"
 
       - name: Setup WSL2
         shell: powershell
@@ -53,7 +61,7 @@ jobs:
           wsl --install --no-distribution
           wsl --set-default-version 2
           wsl --update
-          Start-Sleep -Seconds 20
+          Start-Sleep -Seconds 30
 
       - name: Install Ubuntu in WSL
         shell: powershell
@@ -78,26 +86,20 @@ jobs:
           Start-Sleep -Seconds 30
           wsl -d Ubuntu -u root -- docker ps
 
-      - name: Redirect Port 8080 to WSL
+      - name: Port Forward Windows to WSL
         shell: powershell
         run: |
-          # Obtener IP interna de WSL2
+          # Obtener IP interna de WSL
           $wslIP = (wsl -d Ubuntu hostname -I).Trim().Split()[0]
           Write-Host "WSL IP: $wslIP"
 
           # Redirigir puerto 8080 de Windows a WSL
           netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=8080 connectaddress=$wslIP connectport=8080
 
-          # Abrir puerto en firewall de Windows (todas las reglas posibles)
-          New-NetFirewallRule -DisplayName "Guacamole 8080 In" -Direction Inbound -LocalPort 8080 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue
-          New-NetFirewallRule -DisplayName "Guacamole 8080 Out" -Direction Outbound -LocalPort 8080 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue
-          New-NetFirewallRule -DisplayName "Guacamole 4822 In" -Direction Inbound -LocalPort 4822 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue
-
-          # Verificar que la regla quedó bien
-          Write-Host "`nReglas de portproxy:"
+          # Verificar
           netsh interface portproxy show all
 
-          # Probar que responde localmente
+          # Probar localmente
           Start-Sleep -Seconds 5
           try {
             $test = Invoke-WebRequest -Uri "http://localhost:8080/guacamole/" -UseBasicParsing -TimeoutSec 10
@@ -106,16 +108,24 @@ jobs:
             Write-Host "Prueba local fallo: $_"
           }
 
-      - name: Show Info and Maintain
+      - name: Setup Tailscale Serve (HTTPS Proxy)
         shell: powershell
         run: |
+          # Configurar tailscale serve para exponer localhost:8080 via HTTPS
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" serve --bg --https=443 http://localhost:8080
+          Start-Sleep -Seconds 10
+
+          # Obtener el nombre DNS de Tailscale
+          $tsName = (& "$env:ProgramFiles\Tailscale\tailscale.exe" status --json | ConvertFrom-Json).Self.DNSName
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+
           Write-Host ""
           Write-Host "======================================================"
-          Write-Host " GUACAMOLE LISTO"
+          Write-Host " GUACAMOLE HTTPS LISTO"
           Write-Host "======================================================"
-          Write-Host " URL WEB  : http://${tsIP}:8080/guacamole/"
-          Write-Host " Login    : guacadmin / guacadmin"
+          Write-Host " URL HTTPS    : https://$tsName"
+          Write-Host " URL HTTP     : http://${tsIP}:8080/guacamole/"
+          Write-Host " Login        : guacadmin / guacadmin"
           Write-Host ""
           Write-Host " RDP para agregar en Guacamole:"
           Write-Host "   Host: localhost"
@@ -123,10 +133,33 @@ jobs:
           Write-Host "   User: Skyro"
           Write-Host "   Pass: $env:RDP_PASS"
           Write-Host "======================================================"
+
+          # Guardar nombre DNS en env
+          echo "TS_NAME=$tsName" >> $env:GITHUB_ENV
+
+      - name: Show Info and Maintain
+        shell: powershell
+        run: |
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          $tsName = (& "$env:ProgramFiles\Tailscale\tailscale.exe" status --json | ConvertFrom-Json).Self.DNSName
+
           Write-Host ""
-          Write-Host "Esperando conexion. NO cierres esta ventana."
+          Write-Host "======================================================"
+          Write-Host " ACCESO A GUACAMOLE"
+          Write-Host "======================================================"
+          Write-Host " HTTPS: https://$tsName"
+          Write-Host " HTTP : http://${tsIP}:8080/guacamole/"
+          Write-Host " Login: guacadmin / guacadmin"
           Write-Host ""
+          Write-Host " RDP:"
+          Write-Host "   Host: localhost"
+          Write-Host "   Port: 3389"
+          Write-Host "   User: Skyro"
+          Write-Host "   Pass: $env:RDP_PASS"
+          Write-Host "======================================================"
+          Write-Host ""
+
           while ($true) {
-              Write-Host "[$(Get-Date)] Activo en $tsIP"
+              Write-Host "[$(Get-Date)] Activo - HTTPS: https://$tsName"
               Start-Sleep -Seconds 300
           }
